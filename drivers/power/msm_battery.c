@@ -73,7 +73,7 @@
 #define BATTERY_CB_ID_ALL_ACTIV       	1
 #define BATTERY_CB_ID_LOW_VOL		2
 
-#define BATTERY_LOW            	2800
+#define BATTERY_LOW            	3300
 #define BATTERY_HIGH           	4300
 
 #define ONCRPC_CHG_GET_GENERAL_STATUS_PROC 	12
@@ -763,11 +763,11 @@ static void msm_batt_update_psy_status(void)
 	if (charger_type != msm_batt_info.charger_type  ||
 	            charger_status != msm_batt_info.charger_status )
         {
-	    voltage_dif = 80;
+	    voltage_dif = 50;
         }
         else
         {
-            voltage_dif = 50;
+            voltage_dif = 30;
         }
 
     	if ((charger_type == CHARGER_TYPE_INVALID  ||

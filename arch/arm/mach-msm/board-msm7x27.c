@@ -108,6 +108,7 @@ extern const u32 jrd_batt_level[];
 
 /* Using upper 1/2MB of Apps Bootloader memory*/
 #define MSM_PMEM_AUDIO_START_ADDR	0x80000ul
+
 static struct resource smc91x_resources[] = {
 	[0] = {
 		.start	= 0x9C004300,
@@ -662,7 +663,7 @@ static int gpio_array_num[] = {
 				GPIO_OUT_102, /* spi_sdoi */
 				GPIO_OUT_88
 				};
-
+/*
 static void lcdc_gordon_gpio_init(void)
 {
 	if (gpio_request(GPIO_OUT_132, "spi_clk"))
@@ -675,7 +676,7 @@ static void lcdc_gordon_gpio_init(void)
 		pr_err("failed to request gpio spi_sdoi\n");
 	if (gpio_request(GPIO_OUT_88, "gpio_dac"))
 		pr_err("failed to request gpio_dac\n");
-}
+}*/
 
 static void lcdc_gpio_init(void)
 {
@@ -713,12 +714,12 @@ void config_lcdc_gpio_table(uint32_t *table, int len, unsigned enable)
 		}
 	}
 }
-
+/*
 static void lcdc_gordon_config_gpios(int enable)
 {
 	config_lcdc_gpio_table(lcdc_gpio_table,
 		ARRAY_SIZE(lcdc_gpio_table), enable);
-}
+}*/
 
 static void lcdc_config_gpios(int enable)
 {
@@ -785,24 +786,24 @@ static struct lcdc_platform_data lcdc_pdata = {
 	.lcdc_gpio_config = msm_fb_lcdc_config,
 	.lcdc_power_save   = msm_fb_lcdc_power_save,
 };
-
+/*
 static struct msm_panel_common_pdata lcdc_gordon_panel_data = {
 	.panel_config_gpio = lcdc_gordon_config_gpios,
 	.gpio_num          = gpio_array_num,
-};
+};*/
 
 static struct msm_panel_common_pdata lcdc_panel_pdata = {
 	.panel_config_gpio = lcdc_config_gpios,
 	.gpio_num          = gpio_array_num,
 };
-
+/*
 static struct platform_device lcdc_gordon_panel_device = {
 	.name   = "lcdc_gordon_vga",
 	.id     = 0,
 	.dev    = {
 		.platform_data = &lcdc_gordon_panel_data,
 	}
-};
+};*/
 
 /*
 static struct platform_device lcdc_panel_device = {
@@ -1252,7 +1253,7 @@ struct atmel_i2c_platform_data mxt224_ts_data[] = {
 	.config_T6 = {0, 0, 0, 0, 0, 0},
 	.config_T7 = {50, 13, 50},
 	.config_T8 = {6, 0, 10, 10, 0, 0, 5, 20},
-	.config_T9 = {131, 0, 0, 18, 12, 0, 33, 50, 3, 3, 10, 6, 3, 0x30, 2, 10, 30, 20,7,2,63,1,2, 2, 10, 10, 0x40,0,0,0,20}, // setting [14] to 5 enables 5 pt multitouch, needs to be done for each controller version - netarchy
+	.config_T9 = {131, 0, 0, 18, 12, 0, 33, 50, 3, 3, 10, 6, 3, 0x30, 5, 10, 30, 20,7,2,63,1,2, 2, 10, 10, 0x40,0,0,0,16}, // setting [14] to 5 enables 5 pt multitouch, needs to be done for each controller version - netarchy
 	.config_T18 = {0, 0},
 	.config_T15 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 	.config_T19 = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
@@ -1975,7 +1976,7 @@ static struct platform_device taos_i2c_gpio_device = {
 #if defined(CONFIG_KEYBOARD_FT5X02)
 static struct i2c_gpio_platform_data ft5x02_i2c_gpio_data = {
 	.sda_pin		= 107,
-	.scl_pin		=93,
+	.scl_pin		= 93,
 	.sda_is_open_drain	= 0,
 	.scl_is_open_drain	= 0,
 	.udelay			= 2,
@@ -1994,7 +1995,7 @@ static struct platform_device ft5x02_i2c_gpio_device = {
 #if defined(CONFIG_KEYBOARD_MXT224)
 static struct i2c_gpio_platform_data mxt224_i2c_gpio_data = {
 	.sda_pin		= 107,
-	.scl_pin		=93,
+	.scl_pin		= 93,
 	.sda_is_open_drain	= 0,
 	.scl_is_open_drain	= 0,
 	.udelay			= 2,
@@ -2554,34 +2555,34 @@ static uint32_t msm_sdcc_wifi_setup_power(struct device *dv, unsigned int vdd)
 #if 1
 static struct sdio_embedded_func wifi_func = {
 	.f_class        = 0x07/*SDIO_CLASS_WLAN*/,
- .f_maxblksize   = 512,
+	.f_maxblksize   = 512,
 };
 #endif
 
 static struct embedded_sdio_data wifi_emb_data = {
 	.cis    = {
-		.vendor         = 0x02d0,
-  .device         = 0x4325,
-  .blksize        = 512,
+	.vendor         = 0x02d0,
+	.device         = 0x4325,
+	.blksize        = 512,
   /*.max_dtr      = 24000000,  Max of chip - no worky on Trout */
-  .max_dtr        =   48000000,
+	.max_dtr        =   48000000,
 	},
- .cccr   = {
-	 .multi_block    = 1,
-  .low_speed      = 1,
-  .wide_bus       = 1,
-  .high_power     = 1,
-  .high_speed     = 1,
- },
- .funcs  = &wifi_func,
- .num_funcs = 2,
+	.cccr   = {
+	.multi_block    = 1,
+	.low_speed      = 1,
+	.wide_bus       = 1,
+	.high_power     = 1,
+	.high_speed     = 1,
+	},
+	.funcs  = &wifi_func,
+	.num_funcs = 2,
 };
 
 //1203 add end
 static struct mmc_platform_data msm7x27_sdcc_wifi_data = {
 	.ocr_mask	= MMC_VDD_28_29,
- .embedded_sdio		= &wifi_emb_data,
-    .register_status_notify = wifi_status_notify,
+	.embedded_sdio		= &wifi_emb_data,
+	.register_status_notify = wifi_status_notify,
 	.msmsdcc_fmin	= 144000,
 	.msmsdcc_fmid	= 24576000,
 	//.msmsdcc_fmax	= 49152000,
@@ -2817,9 +2818,9 @@ static void msm7x27_wlan_init(void)
 }
 
 /*
-*Msm7x27 lcd module type is detected by the voltage of GPIO_88,which
-*high or low of it  figures P5562 and ILI9481relevantly.
-*/
+ *Msm7x27 lcd module type is detected by the voltage of GPIO_88,which
+ *high or low of it  figures P5562 and ILI9481relevantly.
+ */
 static int msm7x27_lcd_id_detect(void)
 {
 	unsigned int rc;

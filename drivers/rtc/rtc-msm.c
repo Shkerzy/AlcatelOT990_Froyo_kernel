@@ -168,8 +168,8 @@ static int msmrtc_tod_proc_args(struct msm_rpc_client *client, void *buff,
 		set_req->time.minute = cpu_to_be32(rtc_args->tm->tm_min);
 		set_req->time.second = cpu_to_be32(rtc_args->tm->tm_sec);
 		set_req->time.day_of_week = cpu_to_be32(rtc_args->tm->tm_wday);
-	      if (set_req->time.year < 2010)
-	              set_req->time.year = 2010;
+	      if (set_req->time.year < 2011)
+	              set_req->time.year = 2011;
 
 		return sizeof(*set_req);
 
@@ -211,8 +211,8 @@ static int msmrtc_tod_proc_result(struct msm_rpc_client *client, void *buff,
 		rtc_args->tm->tm_min = be32_to_cpu(result->time.minute);
 		rtc_args->tm->tm_sec = be32_to_cpu(result->time.second);
 		rtc_args->tm->tm_wday = be32_to_cpu(result->time.day_of_week);
-            if (rtc_args->tm->tm_year < 2010)
-   	             rtc_args->tm->tm_year = 2010;
+            if (rtc_args->tm->tm_year < 2011)
+	             rtc_args->tm->tm_year = 2011;
 
 		pr_debug("%s: %.2u/%.2u/%.4u %.2u:%.2u:%.2u (%.2u)\n",
 			__func__, rtc_args->tm->tm_mon, rtc_args->tm->tm_mday,

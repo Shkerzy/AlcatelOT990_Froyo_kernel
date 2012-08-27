@@ -1398,4 +1398,4 @@ module_init(atmel_ts_init);
 module_exit(atmel_ts_exit);
 
 MODULE_DESCRIPTION("ATMEL Touch driver");
-MODULE_LICENSE("GPL");   
+MODULE_LICENSE("GPL");

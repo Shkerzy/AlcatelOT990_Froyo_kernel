@@ -10,7 +10,7 @@ static struct platform_device *flash_led_dev;
 /* Sysfs method to input value of flash_led*/
 static ssize_t write_flash_led(struct device *dev,  struct device_attribute *attr, const char *buffer, size_t count)
 {
-    uint16_t x;
+    int x;
     sscanf(buffer, "%d", &x);
     if(x>=100)
     	{
