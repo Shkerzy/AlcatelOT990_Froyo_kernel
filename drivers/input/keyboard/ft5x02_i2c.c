@@ -24,17 +24,43 @@
 
 #undef DEBUG_FT5X02
 
+/*requested touch panel firmware version*/
 #define REQUIRED_VERSION 0x13
+
+/*the max point supported by IC ft5x02 usually 2 or 5*/
+#define MAX_POINT 5	
+
+/*the y axis of down position*/
+int down_position_y = 0;
 
 #define CDBG(fmt, arg...) printk(fmt, ##arg)
 
 static struct workqueue_struct *ft5x02_wq;
 
-static int down_position_y = 0;
+struct ts_event {
+	u16	x1;
+	u16	y1;
+	u16	x2;
+	u16	y2;
+	u16	x3;
+	u16	y3;
+	u16	x4;
+	u16	y4;
+	u16	x5;
+	u16	y5;
+	u16	pressure;
+    s16 touch_ID1;
+	s16 touch_ID2;
+    s16 touch_ID3;
+    s16 touch_ID4;
+	s16 touch_ID5;
+	u8 touch_point;
+};
 
 struct ft5x02_ts_data {
 	uint16_t addr;
 	struct i2c_client *client;
+	struct ts_event		event;
 	struct input_dev *input_dev;
 	int use_irq;
 	struct hrtimer timer;
@@ -55,79 +81,6 @@ struct i2c_client *ft5x02_client = NULL;
 static char write_reg(unsigned char addr, char v);
 char read_reg(unsigned char addr);
 static int32_t read_info(void * buf);
-static void reg_dump(void );
-
-static ST_TOUCH_POINT touch_point[5];
-static ST_TOUCH_INFO ft_ts_data =
-{
-	.pst_point_info	= touch_point,
-};
-
-#ifdef DEBUG_FT5X02
-static void reg_dump(void)
-{
-	char i;
-	
-	for (i =0;i<0x40;i++){
-		if((i & 0xf) == 0)
-			printk("\n%02x:", i);
-		printk(" %02x", read_reg(i));
-	}
-	printk("\n");
-}
-
-static struct proc_dir_entry *ft5x02proc;
-static int proc_ft5x02_read(char *page, char **start,
-                             off_t off, int count,
-                             int *eof, void *data)
-{
-        int len, ret, i;
-	char comm_buf[128];
-/*
-	ret = read_reg(0x3d, comm_buf, 0x4);
-	*/
-
- 
-	ret = read_info(comm_buf);
-	printk("read info bytes, return %d\n", ret);
-	if (ret < 0) {
-		printk(KERN_ERR "i2c_smbus_read_byte_data failed\n");
-        	len = sprintf(page, "read failed\n");
-		return len;
-	}
-	printk("ft5x02_ts_probe: 0x3b: %2x %2x %2x %2x\n",
-	       comm_buf[0], comm_buf[1], comm_buf[2], comm_buf[3]);
-        	len = sprintf(page, "read reg ok\n");
-
-
-	for (i = 0;i<26;i++)
-		printk(" %2x", comm_buf[i]);
-
-	ret = write_reg(0x08, 0x12);
-	printk("wrte return %d\n", ret);
-
-	reg_dump();
-	//while(1)
-		printk("get gpio 20 %d\n", gpio_get_value(20));
-
-	return len;
-}
-
-static void add_ft5x02_proc(void)
-{
-	ft5x02proc = create_proc_read_entry("ft5x02proc",
-	                                 0444, NULL,
-	                                 proc_ft5x02_read,
-	                                 NULL);
-	if(ft5x02proc== NULL) {
-		printk("creat sleep time proc failed\n");
-	        return;
-	}
-
-//	ft5x02proc->owner = THIS_MODULE;
-}
-#endif
-
 
 /********************************/
 
@@ -246,225 +199,183 @@ static int ft5x02_init_panel(struct ft5x02_ts_data *ts)
 	ret = write_reg(0x07, 200);
 	if(ret < 0)
 		return -1;
-	ret = write_reg(0x08, 0x10);//ret = write_reg(0x08, 0x12);
+	ret = write_reg(0x08, 0x10);
 	if(ret < 0)
 		return -1;
-	ret = write_reg(0x09, 0x28);//ret = write_reg(0x09, 0x30);
+	ret = write_reg(0x09, 0x28);
 	if(ret < 0)
 		return -1;
-	
+
 
 	return 0;
 }
 
-/*********************************************************/
-/****** Function porting from Ft5x02 Sample code *********/
-
-FTS_BYTE bt_parser_fts(FTS_BYTE* pbt_buf, FTS_BYTE bt_len, ST_TOUCH_INFO* pst_touch_info)
+static void ft5x0x_ts_release(struct ft5x02_ts_data *data)
 {
-	FTS_WORD low_byte	= 0;
-	FTS_WORD high_byte	= 0;
-	FTS_BYTE point_num 	= 0;
-	FTS_BYTE i 			= 0;
-	FTS_BYTE ecc 		= 0;
-	char j = 0;
+	input_report_abs(data->input_dev, ABS_MT_TOUCH_MAJOR, 0);
+	input_report_key(data->input_dev, KEY_MENU, 0);
+	input_report_key(data->input_dev, KEY_SEARCH, 0);
+	input_report_key(data->input_dev, KEY_BACK, 0);
+	input_sync(data->input_dev);
+}
+
+static int ft5x02_read_data(struct ft5x02_ts_data *data )
+{
+	struct ts_event *event  	= &data->event;
+
+	FTS_BYTE* buf			= FTS_NULL;
+	FTS_BYTE read_cmd[2]		= {0};
+	FTS_BYTE cmd_len 	   	= 0;
+	FTS_BYTE data_buf[26]	= {0}; 
+	
+	buf = data_buf;
+	read_cmd[0] 	        		= I2C_STARTTCH_READ;
+	cmd_len 			 		= 1;
+
+	/*get the data info by i2c*/
+	read_info(buf);
+
+	event->pressure = 255;
+
 	/*check the pointer*/
-	POINTER_CHECK(pbt_buf);
-	POINTER_CHECK(pst_touch_info);
+	POINTER_CHECK(buf);
 
-	/*check the length of the protocol data*/
-	if(bt_len < PROTOCOL_LEN)
-	{
-		return CTPM_ERR_PARAMETER;
-	}
-	pst_touch_info->bt_tp_num= 0;
-	
 	/*check packet head: 0xAAAA.*/
-	if(pbt_buf[1]!= 0xaa || pbt_buf[0] != 0xaa)
+	if(buf[1]!= 0xaa || buf[0] != 0xaa)
 	{
 		return CTPM_ERR_PROTOCOL;
 	}
+	
 	/*check data length*/
-	if((pbt_buf[2] & 0x3f) != PROTOCOL_LEN)
+	if((buf[2] & 0x3f) != PROTOCOL_LEN)
 	{
 		return CTPM_ERR_PROTOCOL;
-	}			
-	/*check points number.*/
-	point_num = pbt_buf[3] & 0x0f;
-	if(point_num > CTPM_26BYTES_POINTS_MAX)
+	}		
+	/*check the touch point*/
+	event->touch_point = buf[3] & 0x0f;
+	if(event->touch_point > CTPM_26BYTES_POINTS_MAX)
 	{
 		return CTPM_ERR_PROTOCOL;
-	}			
-	/*remove the touch point information into pst_touch_info.*/
-	for(i = 0; i < point_num; i++)
-	{	
-			
-		high_byte = pbt_buf[5+4*i];
-		high_byte <<= 8;
-		low_byte = pbt_buf[5+4*i+1];
-		pst_touch_info->pst_point_info[i].w_tp_x = (high_byte |low_byte) & 0x0fff;
-		
-		high_byte = pbt_buf[5+4*i+2];
-		high_byte <<= 8;
-		low_byte = pbt_buf[5+4*i+3];
-		pst_touch_info->pst_point_info[i].w_tp_y = (high_byte |low_byte) & 0x0fff;
-		
-		pst_touch_info->bt_tp_num++;
+	}	
+
+    	/*get the point info from buf*/
+    	switch (event->touch_point) {
+		if (MAX_POINT == CTPM_26BYTES_POINTS_MAX)	{
+			case 5:
+				event->x5	 = (s16)(buf[21] & 0x0F)<<8 | (s16)buf[22];
+				event->y5	 = (s16)(buf[23] & 0x0F)<<8 | (s16)buf[24];
+				event->touch_ID5 = (s16)(buf[23] & 0xF0)>>4;
+
+			case 4:
+				event->x4 	 = (s16)(buf[17] & 0x0F)<<8 | (s16)buf[18];
+				event->y4 	 = (s16)(buf[19] & 0x0F)<<8 | (s16)buf[20];
+				event->touch_ID4 = (s16)(buf[19] & 0xF0)>>4;
+
+			case 3:
+				event->x3 	 = (s16)(buf[13] & 0x0F)<<8 | (s16)buf[14];
+				event->y3 	 = (s16)(buf[15] & 0x0F)<<8 | (s16)buf[16];
+				event->touch_ID3 = (s16)(buf[16] & 0xF0)>>4;
+		}
+			case 2:
+				event->x2 	 = (s16)(buf[9] & 0x0F)<<8 | (s16)buf[10];
+				event->y2 	 = (s16)(buf[11] & 0x0F)<<8 | (s16)buf[12];
+		    		event->touch_ID2 = (s16)(buf[11] & 0xF0)>>4;
+
+			case 1:
+				event->x1 	 = (s16)(buf[5] & 0x0F)<<8 | (s16)buf[6];
+				event->y1 	 = (s16)(buf[7] & 0x0F)<<8 | (s16)buf[8];
+				event->touch_ID1 = (s16)(buf[7] & 0xF0)>>4;
+
+				/*get the Y axis of down positon*/
+				down_position_y  = (buf[5]>>6) == 0 ? event->y1:0; 
+            			break;
+			default:
+				ft5x0x_ts_release(data);
+		  		return 1;
 	}
-	j = pbt_buf[5];
-		j >>= 6;
-		if (j == 0){
-	down_position_y = pst_touch_info->pst_point_info[0].w_tp_y;
-	}
-	/*check ecc*/
-	ecc = 0;
-	for (i=0; i<bt_len-1; i++)
-	{ 
-		ecc ^= pbt_buf[i];	
-	}
-	if(ecc != pbt_buf[bt_len-1]) 
-	{
-		/*ecc error*/
-		return CTPM_ERR_ECC;
-	}
-	
-	return CTPM_NOERROR;
+
+    return 0;
 }
 
-/*
-[function]: 
-	get all the information of one touch.
-[parameters]:
-	pst_touch_info[out]	:stored all the information of one touch;	
-[return]:
-	CTPM_NOERROR		:success;
-	CTPM_ERR_I2C		:io fail;
-	CTPM_ERR_PROTOCOL	:protocol data error;
-	CTPM_ERR_ECC		:ecc error.
-*/
-FTS_BYTE fts_ctpm_get_touch_info(ST_TOUCH_INFO* pst_touch_info)
+static void ft5x02_report_value(struct ft5x02_ts_data *data )
 {
-	FTS_BYTE* p_data_buf= FTS_NULL;
-	FTS_BYTE read_cmd[2]= {0};
-	FTS_BYTE cmd_len 	= 0;
-	FTS_BYTE data_buf[26]= {0}; 
-	
-	POINTER_CHECK(pst_touch_info);
-	POINTER_CHECK(pst_touch_info->pst_point_info);
+	struct ts_event *event = &data->event;
 
-	p_data_buf = data_buf;
+	switch(event->touch_point) {
+                /*report TRACKING_ID is used here to identify the different point*/
+		if (MAX_POINT == 5)	{
+			case 5:
+				input_report_abs(data->input_dev, ABS_MT_TRACKING_ID, event->touch_ID5);			
+				input_report_abs(data->input_dev, ABS_MT_TOUCH_MAJOR, event->pressure);
+				input_report_abs(data->input_dev, ABS_MT_POSITION_X, event->x5);
+				input_report_abs(data->input_dev, ABS_MT_POSITION_Y, event->y5);
+				input_mt_sync(data->input_dev);
+//				printk("===x5 = %d,y5 = %d ====\n",event->x5,event->y5);
+			case 4:
+				input_report_abs(data->input_dev, ABS_MT_TRACKING_ID, event->touch_ID4);			
+				input_report_abs(data->input_dev, ABS_MT_TOUCH_MAJOR, event->pressure);
+				input_report_abs(data->input_dev, ABS_MT_POSITION_X, event->x4);
+				input_report_abs(data->input_dev, ABS_MT_POSITION_Y, event->y4);
+				input_mt_sync(data->input_dev);
+			case 3:
+				input_report_abs(data->input_dev, ABS_MT_TRACKING_ID, event->touch_ID3);			
+				input_report_abs(data->input_dev, ABS_MT_TOUCH_MAJOR, event->pressure);
+				input_report_abs(data->input_dev, ABS_MT_POSITION_X, event->x3);
+				input_report_abs(data->input_dev, ABS_MT_POSITION_Y, event->y3);
+				input_mt_sync(data->input_dev);
+		}
+			case 2:
+				input_report_abs(data->input_dev, ABS_MT_TRACKING_ID, event->touch_ID2);			
+				input_report_abs(data->input_dev, ABS_MT_TOUCH_MAJOR, event->pressure);
+				input_report_abs(data->input_dev, ABS_MT_POSITION_X, event->x2);
+				input_report_abs(data->input_dev, ABS_MT_POSITION_Y, event->y2);
+				input_mt_sync(data->input_dev);
+			case 1:
 
-	read_cmd[0] 	= I2C_STARTTCH_READ;
-	cmd_len 		= 1;
-	read_info(p_data_buf);
-	//for (i = 0;i<26;i++)
-	//	printk(" %02x", p_data_buf[i]);
-	/*parse the data read out from ctpm and put the touch point information into pst_touch_info*/
-	return bt_parser_fts(p_data_buf, PROTOCOL_LEN, pst_touch_info);
-}
+			 if(event->y1 < 480){
 
-/****** Function porting from Ft5x02 Sample code end *****/
-/*********************************************************/
+				input_report_abs(data->input_dev, ABS_MT_TRACKING_ID, event->touch_ID1);			
+				input_report_abs(data->input_dev, ABS_MT_TOUCH_MAJOR, event->pressure);
+				input_report_abs(data->input_dev, ABS_MT_POSITION_X, event->x1);
+				input_report_abs(data->input_dev, ABS_MT_POSITION_Y, event->y1);
+				input_mt_sync(data->input_dev);
+		
+			}
+			/*make sure that the y axis of down position > 480*/
 
+			 else if((event->y1 > 500)&&(down_position_y>480)){ 
+                                       
+				input_report_abs(data->input_dev, ABS_MT_TOUCH_MAJOR, event->pressure);
+                                if(event->x1 > 9 && event->x1 < 81){
+                                	 input_report_key(data->input_dev, KEY_MENU, 1);  
+                          	}else if((event->x1>124) && (event->x1<196)){                             
+                                	 input_report_key(data->input_dev, KEY_SEARCH, 1);             
+                          	}else if((event->x1>239) && (event->x1<311)){
+                            		input_report_key(data->input_dev, KEY_BACK, 1);
+                          	}
+
+                      	}
+
+		default:
+			break;
+	}
+
+	input_sync(data->input_dev);
+
+}	/*end ft5x0x_report_value*/
+
+/****** Function read touch info and report it ******/
 static void ft5x02_ts_work_func(struct work_struct *work)
 {
-	struct ft5x02_ts_data *ts = container_of(work, struct ft5x02_ts_data, work);
-	fts_ctpm_get_touch_info(&ft_ts_data);
-	static int i = 0, j = 0, k = 0;
-				
-	if (ft_ts_data.bt_tp_num == 0) { //release touch
-		if((i == 1)||(j == 1)||(k == 1)||(i == 2)||(j == 2)||(k == 2))
-			{i = 0;
-			 j = 0;
-			 k = 0;
-			}
-		input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0);
-		input_report_key(ts->input_dev, KEY_MENU, 0);
-		input_report_key(ts->input_dev, KEY_SEARCH, 0);
-		input_report_key(ts->input_dev, KEY_BACK, 0);
+	int ret = -1;
+
+	struct ft5x02_ts_data *ft5x0x_ts =
+		container_of(work, struct ft5x02_ts_data, work);
+
+	ret = ft5x02_read_data(ft5x0x_ts);	
+	if (ret == 0) {	
+		ft5x02_report_value(ft5x0x_ts);
 	}
-	if (ft_ts_data.bt_tp_num >= 1) {
-
-			if(touch_point[0].w_tp_y<480){
-			input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR,255);
-			input_report_abs(ts->input_dev, ABS_MT_POSITION_X,touch_point[0].w_tp_x);
-		        input_report_abs(ts->input_dev, ABS_MT_POSITION_Y,touch_point[0].w_tp_y);
-			input_mt_sync(ts->input_dev);
-			//}else if(touch_point[0].w_tp_y>500){
-			}else if(touch_point[0].w_tp_y>500 && down_position_y > 479){
-					
-
-			 	if(touch_point[0].w_tp_x>9 && touch_point[0].w_tp_x<81){
-					i++;
-					if(i == 3)
-					{
-					input_report_key(ts->input_dev, KEY_MENU, 1);
-					i =0;
-					}		
-				}else if(touch_point[0].w_tp_x>124&&touch_point[0].w_tp_x<196){
-					j++;
-					if(j == 3)
-					{						
-					input_report_key(ts->input_dev, KEY_SEARCH, 1);
-						j =0;
-						}				
-					}else if(touch_point[0].w_tp_x>239&&touch_point[0].w_tp_x<311){
-					k++;
-					if(k == 3)
-					{					
-					input_report_key(ts->input_dev, KEY_BACK, 1);
-						k =0;
-					}				
-				}
-
-			}
-	
-#if defined( DEBUG_FT5X02)
-			printk("P1:%d %d %d %d %d  ", touch_point[0].w_tp_x,
-							touch_point[0].w_tp_y,	
-							touch_point[0].bt_tp_id,	
-							touch_point[0].bt_tp_property,	
-							touch_point[0].w_tp_strenth);
-			printk("\n");
-#endif
-
-	}
-	
-	if (ft_ts_data.bt_tp_num >= 2) {
-		
-		//	input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR,255);
-			
-			if(touch_point[1].w_tp_y<480){
-			input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR,255);                  
-      			input_report_abs(ts->input_dev, ABS_MT_POSITION_X,touch_point[1].w_tp_x);
-                        input_report_abs(ts->input_dev, ABS_MT_POSITION_Y,touch_point[1].w_tp_y);
-			input_mt_sync(ts->input_dev);
-			}
-			else if(touch_point[1].w_tp_y>500){
-			 	if(touch_point[1].w_tp_x>9&&touch_point[1].w_tp_x<81){
-					input_report_key(ts->input_dev, KEY_MENU, 1);
-				}else if(touch_point[1].w_tp_x>124&&touch_point[1].w_tp_x<196){
-					input_report_key(ts->input_dev, KEY_SEARCH, 1);
-				}else if(touch_point[1].w_tp_x>239&&touch_point[1].w_tp_x<311){
-					input_report_key(ts->input_dev, KEY_BACK, 1);
-				}
-
-			}
-		
-		
-#if defined( DEBUG_FT5X02)
-	        printk("P2:%d %d %d %d %d", touch_point[1].w_tp_x,
-							touch_point[1].w_tp_y,	
-							touch_point[1].bt_tp_id,	
-							touch_point[1].bt_tp_property,	
-							touch_point[1].w_tp_strenth);
-		printk("\n");
-#endif
-	}
-	
-
-	input_sync(ts->input_dev);
-	
 }
 
 static enum hrtimer_restart ft5x02_ts_timer_func(struct hrtimer *timer)
@@ -496,41 +407,40 @@ int ft5x02_power(int on_off)
 		       		__func__, PTR_ERR(vreg_tp));
 		return PTR_ERR(vreg_tp);
 	}
-	if(on_off){
-			rc = vreg_set_level(vreg_tp, 3000);
-			if (rc) {
-				printk(KERN_ERR "%s: vreg set level failed (%d)\n",
-			       			__func__, rc);
-				return -EIO;
-			}
-			rc = vreg_enable(vreg_tp);
-			if (rc) {
-				printk(KERN_ERR "%s: vreg enable failed (%d)\n",
-			       			__func__, rc);
-				return -EIO;
-			}
-		}else{
-		        rc = vreg_set_level(vreg_tp, 0);
-			if (rc) {
-				printk(KERN_ERR "%s: vreg set level failed (%d)\n",
-			       			__func__, rc);
-				return -EIO;
-			}
-			
-			rc=vreg_disable(vreg_tp);
-			if (rc) {
-				printk(KERN_ERR "%s: vreg disable failed (%d)\n",
-			       			__func__, rc);
-				return -EIO;
-			}
-			
+	if (on_off) {
+		rc = vreg_set_level(vreg_tp, 3000);
+		if (rc) {
+			printk(KERN_ERR "%s: vreg set level failed (%d)\n",
+		      			__func__, rc);
+			return -EIO;
+		}
+		rc = vreg_enable(vreg_tp);
+		if (rc) {
+			printk(KERN_ERR "%s: vreg enable failed (%d)\n",
+			__func__, rc);
+			return -EIO;
+		}
+	} else {
+	       rc = vreg_set_level(vreg_tp, 0);
+		if (rc) {
+			printk(KERN_ERR "%s: vreg set level failed (%d)\n",
+		       			__func__, rc);
+			return -EIO;
+		}
+		
+		rc=vreg_disable(vreg_tp);
+		if (rc) {
+			printk(KERN_ERR "%s: vreg disable failed (%d)\n",
+		       			__func__, rc);
+			return -EIO;
+		}
+		
 	}
 	msleep(80);
 	return 0;
 }
 
-static int ft5x02_ts_probe(
-	struct i2c_client *client, const struct i2c_device_id *id)
+static int ft5x02_ts_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	struct ft5x02_ts_data *ts;
 	int ret = 0;
@@ -563,23 +473,18 @@ static int ft5x02_ts_probe(
 	/* read i2c data from chip */
 	ret = read_reg(0x3d);
 	printk("ft5x02 id %02x\n", ret);
-//	if (ret != 0x79) {
-//		printk(KERN_ERR "ft5x02 probe failed\n");
-//		goto err_detect_failed;
-//	}
-//	printk("found ft5x02 touch screen!!!\n");
 	
-
-     /****************upgrade tp******************/ 
-        ret = read_reg(0x3b);
+     /****************upgrade tp firmware******************/ 
+	 /**	notice: request 300kHZ i2c speed when upgrade  **/
+       ret = read_reg(0x3b);
 	printk("focaltec's version is %x\n",ret);
 	
-	if(ret <= 0)
-	   {printk(KERN_ERR "ft5x02 read 0x3b failed\n");
-                goto err_detect_failed;     
-	    }
+	if (ret <= 0) {	
+		printk(KERN_ERR "ft5x02 read 0x3b failed\n");
+             goto err_detect_failed; 		 
+	}
 
-	if((ret != REQUIRED_VERSION)&&(ret != 0x07)&&(ret >= 0)){
+	if ((ret != REQUIRED_VERSION) && (ret != 0x07)&&(ret >= 0)) {
 		printk("upgrade.........\n");
 		ret = fts_ctpm_fw_upgrade_with_i_file();         //upgrade firmware
 		if (ret != ERR_OK){
@@ -587,15 +492,7 @@ static int ft5x02_ts_probe(
                   goto err_upgrade_failed;
 		}
 	}
-      /***************upgrade tp end**************/  	
-
-	/**	notice: request 300kHZ i2c speed when upgrade  **/
-
-	/*
-	printk(KERN_INFO "ft5x02_ts_probe: 0xe0: %x %x %x %x %x %x %x %x\n",
-	       buf1[0], buf1[1], buf1[2], buf1[3],
-	       buf1[4], buf1[5], buf1[6], buf1[7]);
-	       */
+      /***************upgrade tp firmware end**************/  	
 
 	ret = ft5x02_init_panel(ts); /* will also switch back to page 0x04 */
 	if (ret < 0) {
@@ -623,6 +520,7 @@ static int ft5x02_ts_probe(
 	input_set_abs_params(ts->input_dev, ABS_MT_TOUCH_MAJOR,0, 255,0, 0);
 	input_set_abs_params(ts->input_dev, ABS_HAT0X, 0, 320, 0, 0);
 	input_set_abs_params(ts->input_dev, ABS_HAT0Y, 0, 480+96, 0, 0);
+	input_set_abs_params(ts->input_dev, ABS_MT_TRACKING_ID, 0, 4, 0, 0);
 
 	/* ts->input_dev->name = ts->keypad_info->name; */
 	ret = input_register_device(ts->input_dev);
@@ -648,10 +546,6 @@ static int ft5x02_ts_probe(
 #endif
 
 	printk(KERN_INFO "ft5x02_ts_probe: Start touchscreen %s in %s mode\n", ts->input_dev->name, ts->use_irq ? "interrupt" : "polling");
-#ifdef DEBUG_FT5X02
-	reg_dump();
-	add_ft5x02_proc();
-#endif
 
 	return 0;
 err_input_register_device_failed:
@@ -683,9 +577,8 @@ static int ft5x02_ts_remove(struct i2c_client *client)
 static int ft5x02_ts_suspend(struct i2c_client *client, pm_message_t mesg)
 {
 	int ret;
-	printk("=========Enter %s\n",__func__);
 	struct ft5x02_ts_data *ts = i2c_get_clientdata(client);
-
+	printk("Enter %s\n",__func__);
 	disable_irq(client->irq);
 	ret = cancel_work_sync(&ts->work);
 	if (ret && ts->use_irq) /* if work was pending disable-count is now 2 */
@@ -707,10 +600,10 @@ static int ft5x02_ts_resume(struct i2c_client *client)
 {
 	int ret;
 
-	printk("=========Enter %s\n",__func__);
+
 	
 	struct ft5x02_ts_data *ts = i2c_get_clientdata(client);
-
+	printk("Enter %s\n",__func__);
 	if (ts->power) {
 		ret = ts->power(1);
 		if (ret < 0)
